@@ -32,7 +32,7 @@ import {
 
 import * as logs from "./logs";
 import * as events from "./events";
-import { getChangeType, getDocumentId } from "./util";
+import { getChangeType, getDocumentId, extractTenantIdFromPath, buildTenantDatasetId } from "./util";
 
 // Configuration for the Firestore Event History Tracker
 const eventTrackerConfig = {
@@ -70,6 +70,49 @@ const eventTracker = new FirestoreBigQueryEventHistoryTracker(
   eventTrackerConfig
 );
 
+const eventTrackerCache = new Map<string, FirestoreBigQueryEventHistoryTracker>();
+const initializationPromises = new Map<string, Promise<void>>();
+
+async function getOrCreateEventTracker(tenantId: string): Promise<FirestoreBigQueryEventHistoryTracker> {
+  const dynamicDatasetId = buildTenantDatasetId(tenantId);
+  const cacheKey = dynamicDatasetId;
+  
+  if (eventTrackerCache.has(cacheKey)) {
+    return eventTrackerCache.get(cacheKey)!;
+  }
+
+  if (initializationPromises.has(cacheKey)) {
+    await initializationPromises.get(cacheKey);
+    return eventTrackerCache.get(cacheKey)!;
+  }
+
+  const initPromise = (async () => {
+    const dynamicConfig = {
+      ...eventTrackerConfig,
+      datasetId: dynamicDatasetId,
+      skipInit: false,
+    };
+
+    const tracker = new FirestoreBigQueryEventHistoryTracker(dynamicConfig);
+    
+    try {
+      await tracker.initialize();
+      eventTrackerCache.set(cacheKey, tracker);
+      logs.logger.info(`Initialized BigQuery tracker for tenant: ${tenantId}, dataset: ${dynamicDatasetId}, table: ${config.tableId}`);
+    } catch (error) {
+      logs.error(true, `Failed to initialize tracker for tenant ${tenantId}`, error);
+      throw error;
+    } finally {
+      initializationPromises.delete(cacheKey);
+    }
+  })();
+
+  initializationPromises.set(cacheKey, initPromise);
+  await initPromise;
+  
+  return eventTrackerCache.get(cacheKey)!;
+}
+
 logs.logger.setLogLevel(config.logLevel);
 logs.init();
 
@@ -92,6 +135,7 @@ interface SyncBigQueryTaskData {
   params: Record<string, any> | null;
   data: any;
   oldData: any;
+  tenantId?: string;
 }
 
 /**
@@ -112,13 +156,23 @@ export const syncBigQuery = functions.tasks
     );
 
     try {
+      let dynamicEventTracker: FirestoreBigQueryEventHistoryTracker;
+      
+      if (taskData.tenantId) {
+        dynamicEventTracker = await getOrCreateEventTracker(taskData.tenantId);
+      } else {
+        const tenantId = extractTenantIdFromPath(taskData.relativePath);
+        dynamicEventTracker = await getOrCreateEventTracker(tenantId);
+      }
+
       await recordEventToBigQuery(
         taskData.changeType,
         taskData.documentId,
         taskData.fullResourceName,
         taskData.data,
         taskData.oldData,
-        taskData
+        taskData,
+        dynamicEventTracker
       );
 
       await events.recordSuccessEvent({
@@ -181,12 +235,29 @@ export const fsexportbigquery = onDocumentWritten(
       operation
     );
 
+    let tenantId: string;
+    let dynamicEventTracker: FirestoreBigQueryEventHistoryTracker;
+
+    try {
+      tenantId = extractTenantIdFromPath(relativeName);
+      dynamicEventTracker = await getOrCreateEventTracker(tenantId);
+    } catch (err) {
+      logs.logFailedEventAction(
+        "Failed to get or create event tracker for tenant",
+        fullResourceName,
+        eventId,
+        operation,
+        err as Error
+      );
+      throw err;
+    }
+
     let serializedData: any;
     let serializedOldData: any;
 
     try {
-      serializedData = eventTracker.serializeData(newData);
-      serializedOldData = eventTracker.serializeData(oldData);
+      serializedData = dynamicEventTracker.serializeData(newData);
+      serializedOldData = dynamicEventTracker.serializeData(oldData);
     } catch (err) {
       logs.logFailedEventAction(
         "Failed to serialize data",
@@ -228,7 +299,9 @@ export const fsexportbigquery = onDocumentWritten(
           params: config.wildcardIds ? context.params : null,
           data: serializedData,
           oldData: serializedOldData,
-        }
+          tenantId,
+        },
+        dynamicEventTracker
       );
     } catch (err) {
       logs.failedToWriteToBigQueryImmediately(err as Error);
@@ -243,6 +316,7 @@ export const fsexportbigquery = onDocumentWritten(
         params: config.wildcardIds ? context.params : null,
         data: serializedData,
         oldData: serializedOldData,
+        tenantId,
       });
     }
 
@@ -266,7 +340,8 @@ async function recordEventToBigQuery(
   fullResourceName: string,
   serializedData: any,
   serializedOldData: any,
-  taskData: SyncBigQueryTaskData
+  taskData: SyncBigQueryTaskData,
+  tracker: FirestoreBigQueryEventHistoryTracker
 ) {
   const event: FirestoreDocumentChangeEvent = {
     timestamp: taskData.timestamp,
@@ -281,7 +356,7 @@ async function recordEventToBigQuery(
     oldData: serializedOldData,
   };
 
-  await eventTracker.record([event]);
+  await tracker.record([event]);
 }
 
 /**
@@ -292,6 +367,12 @@ async function recordEventToBigQuery(
  */
 async function attemptToEnqueue(_err: Error, taskData: SyncBigQueryTaskData) {
   try {
+    const tenantId = extractTenantIdFromPath(taskData.relativePath);
+    const taskDataWithTenant = {
+      ...taskData,
+      tenantId,
+    };
+
     const queue = getFunctions().taskQueue(
       `locations/${config.location}/functions/syncBigQuery`,
       config.instanceId
@@ -309,7 +390,7 @@ async function attemptToEnqueue(_err: Error, taskData: SyncBigQueryTaskData) {
 
       attempts++;
       try {
-        await queue.enqueue(taskData);
+        await queue.enqueue(taskDataWithTenant);
         break;
       } catch (enqueueErr) {
         if (attempts === config.maxEnqueueAttempts) {

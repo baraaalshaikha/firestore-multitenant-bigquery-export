@@ -64,3 +64,18 @@ export const resolveWildcardIds = (template: string, text: string) => {
       return previousValue;
     }, {});
 };
+
+export function extractTenantIdFromPath(documentPath: string, tenantPosition: number = 1): string {
+  const segments = documentPath.split('/');
+  
+  if (segments.length <= tenantPosition) {
+    throw new Error(`Unable to extract tenant ID from path: ${documentPath} at position ${tenantPosition}`);
+  }
+  
+  return segments[tenantPosition];
+}
+
+export function buildTenantDatasetId(tenantId: string): string {
+  const sanitizedTenantId = tenantId.replace(/[^a-zA-Z0-9_]/g, '_');
+  return `tenant_${sanitizedTenantId}`;
+}
