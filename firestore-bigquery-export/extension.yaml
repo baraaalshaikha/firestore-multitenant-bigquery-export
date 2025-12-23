@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: firestore-bigquery-export
+name: firestore-multitenant-bigquery-export
 version: 0.2.6
 specVersion: v1beta
 
-displayName: Stream Firestore to BigQuery
+displayName: Stream Firestore to BigQuery (Multi-tenant)
 description:
   Sends realtime, incremental updates from a specified Cloud Firestore
-  collection to BigQuery.
+  collection to BigQuery. This extension is designed for multi-tenant environments.
 
 license: Apache-2.0
 
@@ -27,13 +27,13 @@ sourceUrl: https://github.com/firebase/extensions/tree/master/firestore-bigquery
 releaseNotesUrl: https://github.com/firebase/extensions/blob/master/firestore-bigquery-export/CHANGELOG.md
 
 author:
-  authorName: Firebase
-  url: https://firebase.google.com
+  authorName: Nama Solutions
+  url: https://namaaalsharq.sa
 
 contributors:
-  - authorName: Jan Wyszynski
-    email: wyszynski@google.com
-    url: https://github.com/IanWyszynski
+  - authorName: Baraa Alsheekha
+    email: b.alsheekha@namaa-solutions.com
+    url: https://github.com/baraaalshaikha
 
 billingRequired: true
 
