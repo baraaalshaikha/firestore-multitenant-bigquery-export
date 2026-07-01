@@ -58,7 +58,7 @@ export async function initializeLatestView({
     });
   }
 
-  const schema = RawChangelogViewSchema;
+  const schema = { fields: [...RawChangelogViewSchema.fields] };
 
   if (viewExists) {
     logs.bigQueryViewAlreadyExists(view.id, dataset.id);
