@@ -28,6 +28,7 @@ import {
   ChangeType,
   FirestoreBigQueryEventHistoryTracker,
   FirestoreDocumentChangeEvent,
+  RawChangelogViewSchema,
 } from "@firebaseextensions/firestore-bigquery-change-tracker";
 
 import * as logs from "./logs";
@@ -42,10 +43,7 @@ const eventTrackerConfig = {
   datasetLocation: config.datasetLocation,
   backupTableId: config.backupCollectionId,
   transformFunction: config.transformFunction,
-  timePartitioning: config.timePartitioning,
-  timePartitioningField: config.timePartitioningField,
-  timePartitioningFieldType: config.timePartitioningFieldType,
-  timePartitioningFirestoreField: config.timePartitioningFirestoreField,
+  partitioning: config.partitioning,
   // Database related configurations
   databaseId: config.databaseId,
   clustering: config.clustering,
@@ -71,6 +69,22 @@ const eventTracker = new FirestoreBigQueryEventHistoryTracker(
 );
 
 const eventTrackerCache = new Map<string, FirestoreBigQueryEventHistoryTracker>();
+
+// The tracker's existing-view path pushes `path_params` onto the shared
+// RawChangelogViewSchema (firebase/extensions#3144). With several tenants per
+// process that pile-up breaks later views, so each tenant initializes from the
+// original fields, one at a time.
+const pristineViewFields = [...RawChangelogViewSchema.fields];
+let initQueue: Promise<unknown> = Promise.resolve();
+
+function initializeTracker(tracker: FirestoreBigQueryEventHistoryTracker): Promise<void> {
+  const run = initQueue.then(() => {
+    RawChangelogViewSchema.fields.splice(0, RawChangelogViewSchema.fields.length, ...pristineViewFields);
+    return tracker.initialize();
+  });
+  initQueue = run.catch(() => undefined);
+  return run;
+}
 const initializationPromises = new Map<string, Promise<void>>();
 
 async function getOrCreateEventTracker(tenantId: string): Promise<FirestoreBigQueryEventHistoryTracker> {
@@ -96,7 +110,7 @@ async function getOrCreateEventTracker(tenantId: string): Promise<FirestoreBigQu
     const tracker = new FirestoreBigQueryEventHistoryTracker(dynamicConfig);
     
     try {
-      await tracker.initialize();
+      await initializeTracker(tracker);
       eventTrackerCache.set(cacheKey, tracker);
       logs.logger.info(`Initialized BigQuery tracker for tenant: ${tenantId}, dataset: ${dynamicDatasetId}, table: ${config.tableId}`);
     } catch (error) {

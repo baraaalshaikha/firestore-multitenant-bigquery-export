@@ -1,3 +1,65 @@
+## Version 0.3.0 (multi-tenant fork)
+
+Rebased on upstream firestore-bigquery-export 0.3.4 (change-tracker 2.2.1), keeping the per-tenant dataset routing (`tenants/{tenantId}/...` -> `tenant_{tenantId}`).
+
+fix: stop rewriting table metadata on every tracker initialize. With `WILDCARD_IDS=true` the old update check was always true, so every instance rewrote each tenant's table metadata and hit BigQuery's per-table update rate limit ("Exceeded rate limits: too many table update operations for this table"). Fixed upstream in firebase/extensions#2817.
+
+chore: functions runtime nodejs20 -> nodejs22 (from upstream).
+
+## Version 0.3.4
+
+chore: bump firestore-bigquery-change-tracker dependency to v2.2.1
+
+fix: failed BigQuery inserts are no longer reported as successful while silently dropping unrecognised fields; rows BigQuery rejects are now written to `BACKUP_COLLECTION` (when set), logged as errors, and retried through Cloud Tasks
+
+fix: stop updating the BigQuery table metadata every time the extension is configured or updated when nothing has changed
+
+## Version 0.3.3
+
+chore: remove unused runtime dependencies and bump change-tracker consumers
+
+## Version 0.3.2
+
+fix: restore acceptance of ISO 8601 date/datetime strings as partition field values, regression introduced in 0.3.0 (#2803)
+
+## Version 0.3.1
+
+chore: bump dependencies
+
+## Version 0.3.0
+
+breaking change: reject invalid partitioning configuration combinations at startup with explicit error messages
+
+fix: normalize `NONE` / `omit` partitioning sentinels before mapping to change-tracker 2.x partitioning strategy
+
+## Version 0.2.11
+
+chore: bump firestore-bigquery-change-tracker dependency to v2 in functions package
+
+## Version 0.2.10
+
+chore: add overrides for http-proxy-agent and inquirer to resolve npm audit vulnerabilities
+
+chore: remove unused inquirer dependency from functions
+
+## Version 0.2.9
+
+chore: update Cloud Functions runtime to Node.js 22
+
+## Version 0.2.8
+
+chore: move test/build dependencies to devDependencies
+
+chore: upgrade jest from 25 to 29.5.0 and ts-jest from 27 to 29.1.2
+
+chore: remove unused jest-config dependency
+
+chore: add minimatch override to resolve npm audit vulnerabilities
+
+## Version 0.2.7
+
+chore: bump dependencies
+
 ## Version 0.2.6
 
 docs: update docs to reference the correct "latest" view names
